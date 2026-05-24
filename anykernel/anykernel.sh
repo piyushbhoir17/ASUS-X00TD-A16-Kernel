@@ -65,29 +65,31 @@ author=Antigravity
 description=Systemlessly disables hardware video encoders to restore smooth hardware-accelerated VP9/HEVC 1080p60 decoding.
 EOF
 
-    # Copy and patch the XML configs directly in the recovery environment
-    # (Tries both possible mount paths)
-    if [ -f /vendor/etc/media_codecs.xml ]; then
-      cp -f /vendor/etc/media_codecs.xml "$MODDIR/system/vendor/etc/media_codecs.xml"
-      cp -f /vendor/etc/media_codecs_vendor.xml "$MODDIR/system/vendor/etc/media_codecs_vendor.xml"
-    elif [ -f /system/vendor/etc/media_codecs.xml ]; then
-      cp -f /system/vendor/etc/media_codecs.xml "$MODDIR/system/vendor/etc/media_codecs.xml"
-      cp -f /system/vendor/etc/media_codecs_vendor.xml "$MODDIR/system/vendor/etc/media_codecs_vendor.xml"
+    # Copy and patch ALL media_codecs*.xml configs from the device vendor partition
+    VNDETC=""
+    if [ -d /vendor/etc ]; then
+      VNDETC="/vendor/etc"
+    elif [ -d /system/vendor/etc ]; then
+      VNDETC="/system/vendor/etc"
     fi
 
-    # Disable hardware encoders and hardware H.264/legacy decoders to restore smooth software fallback
-    # (While keeping hardware VP9 and HEVC decoders active for 1080p60 YouTube!)
-    sed -i 's/OMX.qcom.video.encoder/OMX.qcom.video.encoder.disabled/g' "$MODDIR/system/vendor/etc/media_codecs.xml" 2>/dev/null
-    sed -i 's/OMX.qcom.video.encoder/OMX.qcom.video.encoder.disabled/g' "$MODDIR/system/vendor/etc/media_codecs_vendor.xml" 2>/dev/null
-    
-    sed -i 's/OMX.qcom.video.decoder.avc/OMX.qcom.video.decoder.avc.disabled/g' "$MODDIR/system/vendor/etc/media_codecs.xml" 2>/dev/null
-    sed -i 's/OMX.qcom.video.decoder.avc/OMX.qcom.video.decoder.avc.disabled/g' "$MODDIR/system/vendor/etc/media_codecs_vendor.xml" 2>/dev/null
-    
-    sed -i 's/OMX.qcom.video.decoder.mpeg4/OMX.qcom.video.decoder.mpeg4.disabled/g' "$MODDIR/system/vendor/etc/media_codecs.xml" 2>/dev/null
-    sed -i 's/OMX.qcom.video.decoder.mpeg4/OMX.qcom.video.decoder.mpeg4.disabled/g' "$MODDIR/system/vendor/etc/media_codecs_vendor.xml" 2>/dev/null
-    
-    sed -i 's/OMX.qcom.video.decoder.h263/OMX.qcom.video.decoder.h263.disabled/g' "$MODDIR/system/vendor/etc/media_codecs.xml" 2>/dev/null
-    sed -i 's/OMX.qcom.video.decoder.h263/OMX.qcom.video.decoder.h263.disabled/g' "$MODDIR/system/vendor/etc/media_codecs_vendor.xml" 2>/dev/null
+    if [ -n "$VNDETC" ]; then
+      ui_print "- Copying and patching all media codec configuration files...";
+      for xml in "$VNDETC"/media_codecs*.xml; do
+        if [ -f "$xml" ]; then
+          name=$(basename "$xml")
+          cp -f "$xml" "$MODDIR/system/vendor/etc/$name"
+          
+          # Disable all hardware video decoders and encoders in this file
+          sed -i 's/OMX.qcom.video.decoder/OMX.qcom.video.decoder.disabled/g' "$MODDIR/system/vendor/etc/$name" 2>/dev/null
+          sed -i 's/OMX.qcom.video.encoder/OMX.qcom.video.encoder.disabled/g' "$MODDIR/system/vendor/etc/$name" 2>/dev/null
+          
+          chmod 644 "$MODDIR/system/vendor/etc/$name"
+        fi
+      done
+    else
+      ui_print "- Vendor etc directory not found! Skipping media configs patch.";
+    fi
 
     # Set correct module permissions
     chmod 755 "$MODDIR"
@@ -95,8 +97,6 @@ EOF
     chmod 755 "$MODDIR/system/vendor"
     chmod 755 "$MODDIR/system/vendor/etc"
     chmod 644 "$MODDIR/module.prop"
-    chmod 644 "$MODDIR/system/vendor/etc/media_codecs.xml" 2>/dev/null
-    chmod 644 "$MODDIR/system/vendor/etc/media_codecs_vendor.xml" 2>/dev/null
     ui_print "- Media overlay module successfully installed!";
 
     # 2. Install boot-time AI-Booster script
