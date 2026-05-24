@@ -78,14 +78,7 @@ pkill -f -9 mediacodec
 # ANTIGRAVITY AI & PERFORMANCE BOOSTER TUNINGS
 # ====================================================
 
-# 1. Virtual Memory (VM) Tuning for Fast AI Model Loading
-# Reduce swap overhead and optimize memory allocation pages
-echo "10" > /proc/sys/vm/swappiness
-echo "100" > /proc/sys/vm/vfs_cache_pressure
-echo "90" > /proc/sys/vm/dirty_ratio
-echo "5" > /proc/sys/vm/dirty_background_ratio
-
-# 2. CPU Governor Responsive Scheduling (schedutil / EAS)
+# 1. CPU Governor Responsive Scheduling (schedutil / EAS)
 # Make CPU scale up frequencies instantly under AI/system load
 for governor in /sys/devices/system/cpu/cpufreq/policy*/schedutil; do
   if [ -d "$governor" ]; then
@@ -94,14 +87,11 @@ for governor in /sys/devices/system/cpu/cpufreq/policy*/schedutil; do
   fi
 done
 
-# 3. Adreno GPU Governor Tuning for aggressive render scaling
+# 2. Adreno GPU Governor Tuning
+# Ensure standard power-saving devfreq governor is active
 echo "msm-adreno-tz" > /sys/class/kgsl/kgsl-3d0/devfreq/governor
-echo "0" > /sys/class/kgsl/kgsl-3d0/bus_split 2>/dev/null
-echo "1" > /sys/class/kgsl/kgsl-3d0/force_bus_on 2>/dev/null
-echo "1" > /sys/class/kgsl/kgsl-3d0/force_clk_on 2>/dev/null
-echo "0" > /sys/class/kgsl/kgsl-3d0/force_no_nap 2>/dev/null
 
-# 4. Storage I/O Read-Ahead size optimization (Fast media reading)
+# 3. Storage I/O Read-Ahead size optimization (Fast media reading)
 echo "512" > /sys/block/mmcblk0/queue/read_ahead_kb 2>/dev/null
 echo "512" > /sys/block/mmcblk1/queue/read_ahead_kb 2>/dev/null
 EOF
