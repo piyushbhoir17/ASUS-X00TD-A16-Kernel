@@ -106,13 +106,20 @@ EOF
     cat <<'EOF' > "$SVCSCRIPT"
 #!/system/bin/sh
 # Wait for boot to progress
-sleep 5
+sleep 10
 
 # ====================================================
 # ANTIGRAVITY AI & PERFORMANCE BOOSTER TUNINGS
 # ====================================================
 
-# 1. CPU Governor Responsive Scheduling (schedutil / EAS)
+# 1. CPU EAS Schedtune Boost (Forces active app/UI threads to run on Big Cores)
+if [ -d /dev/stune ]; then
+  echo "30" > /dev/stune/top-app/schedtune.boost 2>/dev/null
+  echo "5" > /dev/stune/foreground/schedtune.boost 2>/dev/null
+  echo "1" > /dev/stune/top-app/schedtune.prefer_idle 2>/dev/null
+fi
+
+# 2. CPU Governor Responsive Scheduling (schedutil / EAS)
 for governor in /sys/devices/system/cpu/cpufreq/policy*/schedutil; do
   if [ -d "$governor" ]; then
     echo "500" > "$governor/up_rate_limit_us" 2>/dev/null
@@ -120,10 +127,24 @@ for governor in /sys/devices/system/cpu/cpufreq/policy*/schedutil; do
   fi
 done
 
-# 2. Adreno GPU Governor Tuning
-echo "msm-adreno-tz" > /sys/class/kgsl/kgsl-3d0/devfreq/governor
+# 3. Schedutil hispeed_freq & hispeed_load tuning (Ensures instant scale up under video/UI load)
+# Little Cores policy0 (default min: 633MHz, max: 1.6GHz)
+if [ -d /sys/devices/system/cpu/cpufreq/policy0/schedutil ]; then
+  echo "1113600" > /sys/devices/system/cpu/cpufreq/policy0/schedutil/hispeed_freq 2>/dev/null
+  echo "85" > /sys/devices/system/cpu/cpufreq/policy0/schedutil/hispeed_load 2>/dev/null
+fi
+# Big Cores policy4 (default min: 1.11GHz, max: 1.8GHz)
+if [ -d /sys/devices/system/cpu/cpufreq/policy4/schedutil ]; then
+  echo "1400064" > /sys/devices/system/cpu/cpufreq/policy4/schedutil/hispeed_freq 2>/dev/null
+  echo "80" > /sys/devices/system/cpu/cpufreq/policy4/schedutil/hispeed_load 2>/dev/null
+fi
 
-# 3. Storage I/O Read-Ahead size optimization
+# 4. Adreno GPU Governor & Minimum Frequency Tuning
+echo "msm-adreno-tz" > /sys/class/kgsl/kgsl-3d0/devfreq/governor
+# Keep GPU clock at 266MHz/300MHz minimum under load to prevent stutters
+echo "300000000" > /sys/class/kgsl/kgsl-3d0/devfreq/min_freq 2>/dev/null
+
+# 5. Storage I/O Read-Ahead size optimization (Faster video buffering)
 echo "512" > /sys/block/mmcblk0/queue/read_ahead_kb 2>/dev/null
 echo "512" > /sys/block/mmcblk1/queue/read_ahead_kb 2>/dev/null
 EOF
