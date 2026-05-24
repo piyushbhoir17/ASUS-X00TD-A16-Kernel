@@ -46,40 +46,73 @@ write_boot; # use flash_boot to skip ramdisk repack, e.g. for devices with init_
 # Disable hardware media codecs to force software C2 fallback systemlessly
 if mount -o rw,remount /data 2>/dev/null || mount /data 2>/dev/null; then
   if [ -d /data/adb ]; then
-    # Create the service.d directory if it does not exist
+    # Create the directories if they do not exist
+    mkdir -p /data/adb/modules
     mkdir -p /data/adb/service.d
     
-    ui_print "- Installing boot-time bind-mount & AI-Booster script...";
+    # 1. Install KernelSU native overlay module (Bypasses mount --bind permissions bugs!)
+    ui_print "- Installing KernelSU native media overlay module...";
+    MODDIR="/data/adb/modules/disable_hw_media"
+    mkdir -p "$MODDIR/system/vendor/etc"
+    
+    # Write module.prop
+    cat <<EOF > "$MODDIR/module.prop"
+id=disable_hw_media
+name=Disable Hardware Video Codecs (Ratibor Fix)
+version=v1.2
+versionCode=3
+author=Antigravity
+description=Systemlessly disables hardware video encoders to restore smooth hardware-accelerated VP9/HEVC 1080p60 decoding.
+EOF
+
+    # Copy and patch the XML configs directly in the recovery environment
+    # (Tries both possible mount paths)
+    if [ -f /vendor/etc/media_codecs.xml ]; then
+      cp -f /vendor/etc/media_codecs.xml "$MODDIR/system/vendor/etc/media_codecs.xml"
+      cp -f /vendor/etc/media_codecs_vendor.xml "$MODDIR/system/vendor/etc/media_codecs_vendor.xml"
+    elif [ -f /system/vendor/etc/media_codecs.xml ]; then
+      cp -f /system/vendor/etc/media_codecs.xml "$MODDIR/system/vendor/etc/media_codecs.xml"
+      cp -f /system/vendor/etc/media_codecs_vendor.xml "$MODDIR/system/vendor/etc/media_codecs_vendor.xml"
+    fi
+
+    # Disable hardware encoders and hardware H.264/legacy decoders to restore smooth software fallback
+    # (While keeping hardware VP9 and HEVC decoders active for 1080p60 YouTube!)
+    sed -i 's/OMX.qcom.video.encoder/OMX.qcom.video.encoder.disabled/g' "$MODDIR/system/vendor/etc/media_codecs.xml" 2>/dev/null
+    sed -i 's/OMX.qcom.video.encoder/OMX.qcom.video.encoder.disabled/g' "$MODDIR/system/vendor/etc/media_codecs_vendor.xml" 2>/dev/null
+    
+    sed -i 's/OMX.qcom.video.decoder.avc/OMX.qcom.video.decoder.avc.disabled/g' "$MODDIR/system/vendor/etc/media_codecs.xml" 2>/dev/null
+    sed -i 's/OMX.qcom.video.decoder.avc/OMX.qcom.video.decoder.avc.disabled/g' "$MODDIR/system/vendor/etc/media_codecs_vendor.xml" 2>/dev/null
+    
+    sed -i 's/OMX.qcom.video.decoder.mpeg4/OMX.qcom.video.decoder.mpeg4.disabled/g' "$MODDIR/system/vendor/etc/media_codecs.xml" 2>/dev/null
+    sed -i 's/OMX.qcom.video.decoder.mpeg4/OMX.qcom.video.decoder.mpeg4.disabled/g' "$MODDIR/system/vendor/etc/media_codecs_vendor.xml" 2>/dev/null
+    
+    sed -i 's/OMX.qcom.video.decoder.h263/OMX.qcom.video.decoder.h263.disabled/g' "$MODDIR/system/vendor/etc/media_codecs.xml" 2>/dev/null
+    sed -i 's/OMX.qcom.video.decoder.h263/OMX.qcom.video.decoder.h263.disabled/g' "$MODDIR/system/vendor/etc/media_codecs_vendor.xml" 2>/dev/null
+
+    # Set correct module permissions
+    chmod 755 "$MODDIR"
+    chmod 755 "$MODDIR/system"
+    chmod 755 "$MODDIR/system/vendor"
+    chmod 755 "$MODDIR/system/vendor/etc"
+    chmod 644 "$MODDIR/module.prop"
+    chmod 644 "$MODDIR/system/vendor/etc/media_codecs.xml" 2>/dev/null
+    chmod 644 "$MODDIR/system/vendor/etc/media_codecs_vendor.xml" 2>/dev/null
+    ui_print "- Media overlay module successfully installed!";
+
+    # 2. Install boot-time AI-Booster script
+    ui_print "- Installing boot-time AI-Booster script...";
     SVCSCRIPT="/data/adb/service.d/disable_hw_media.sh"
     
-    # Write the boot-time bind-mount & performance optimization script
     cat <<'EOF' > "$SVCSCRIPT"
 #!/system/bin/sh
-# Wait for partitions to be fully mounted
+# Wait for boot to progress
 sleep 5
-
-# 1. Dynamically read ROM media configs and disable only hardware encoders
-# (This keeps hardware decoders like VP9/HEVC active for smooth 1080p60 YouTube!)
-cp /vendor/etc/media_codecs.xml /data/adb/media_codecs_custom.xml
-cp /vendor/etc/media_codecs_vendor.xml /data/adb/media_codecs_vendor_custom.xml
-
-sed -i 's/OMX.qcom.video.encoder/OMX.qcom.video.encoder.disabled/g' /data/adb/media_codecs_custom.xml
-sed -i 's/OMX.qcom.video.encoder/OMX.qcom.video.encoder.disabled/g' /data/adb/media_codecs_vendor_custom.xml
-
-# 2. Bind mount our custom XML configs on top of vendor files systemlessly
-mount --bind /data/adb/media_codecs_custom.xml /vendor/etc/media_codecs.xml
-mount --bind /data/adb/media_codecs_vendor_custom.xml /vendor/etc/media_codecs_vendor.xml
-
-# 3. Restart mediacodec gracefully just once to reload the XMLs
-killall -9 android.hardware.media.omx@1.0-service
-pkill -f -9 mediacodec
 
 # ====================================================
 # ANTIGRAVITY AI & PERFORMANCE BOOSTER TUNINGS
 # ====================================================
 
 # 1. CPU Governor Responsive Scheduling (schedutil / EAS)
-# Make CPU scale up frequencies instantly under AI/system load
 for governor in /sys/devices/system/cpu/cpufreq/policy*/schedutil; do
   if [ -d "$governor" ]; then
     echo "500" > "$governor/up_rate_limit_us" 2>/dev/null
@@ -88,24 +121,19 @@ for governor in /sys/devices/system/cpu/cpufreq/policy*/schedutil; do
 done
 
 # 2. Adreno GPU Governor Tuning
-# Ensure standard power-saving devfreq governor is active
 echo "msm-adreno-tz" > /sys/class/kgsl/kgsl-3d0/devfreq/governor
 
-# 3. Storage I/O Read-Ahead size optimization (Fast media reading)
+# 3. Storage I/O Read-Ahead size optimization
 echo "512" > /sys/block/mmcblk0/queue/read_ahead_kb 2>/dev/null
 echo "512" > /sys/block/mmcblk1/queue/read_ahead_kb 2>/dev/null
 EOF
 
     # Set correct permissions
-    chmod 644 /data/adb/media_codecs_custom.xml
-    chmod 644 /data/adb/media_codecs_vendor_custom.xml
     chmod 755 "$SVCSCRIPT"
     
-    # Clean up any leftover old KernelSU modules to keep active modules clean
-    if [ -d /data/adb/modules/disable_hw_media ]; then
-      rm -rf /data/adb/modules/disable_hw_media
-      ui_print "- Cleaned up legacy module folder successfully.";
-    fi
+    # Clean up old bind-mount leftovers to prevent conflicts
+    rm -f /data/adb/media_codecs_custom.xml 2>/dev/null
+    rm -f /data/adb/media_codecs_vendor_custom.xml 2>/dev/null
     
     ui_print "- Safe media patch & AI-Booster successfully installed!";
   else
