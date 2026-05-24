@@ -49,21 +49,6 @@ if mount -o rw,remount /data 2>/dev/null || mount /data 2>/dev/null; then
     # Create the service.d directory if it does not exist
     mkdir -p /data/adb/service.d
     
-    ui_print "- Installing direct XML configuration files...";
-    # Write custom media_codecs_custom.xml
-    cat <<'EOF' > /data/adb/media_codecs_custom.xml
-<?xml version="1.0" encoding="utf-8"?>
-<MediaCodecs>
-</MediaCodecs>
-EOF
-
-    # Write custom media_codecs_vendor_custom.xml
-    cat <<'EOF' > /data/adb/media_codecs_vendor_custom.xml
-<?xml version="1.0" encoding="utf-8"?>
-<MediaCodecs>
-</MediaCodecs>
-EOF
-
     ui_print "- Installing boot-time bind-mount & AI-Booster script...";
     SVCSCRIPT="/data/adb/service.d/disable_hw_media.sh"
     
@@ -72,10 +57,20 @@ EOF
 #!/system/bin/sh
 # Wait for partitions to be fully mounted
 sleep 5
-# Bind mount our software-only XML configs on top of vendor files systemlessly
+
+# 1. Dynamically read ROM media configs and disable only hardware encoders
+# (This keeps hardware decoders like VP9/HEVC active for smooth 1080p60 YouTube!)
+cp /vendor/etc/media_codecs.xml /data/adb/media_codecs_custom.xml
+cp /vendor/etc/media_codecs_vendor.xml /data/adb/media_codecs_vendor_custom.xml
+
+sed -i 's/OMX.qcom.video.encoder/OMX.qcom.video.encoder.disabled/g' /data/adb/media_codecs_custom.xml
+sed -i 's/OMX.qcom.video.encoder/OMX.qcom.video.encoder.disabled/g' /data/adb/media_codecs_vendor_custom.xml
+
+# 2. Bind mount our custom XML configs on top of vendor files systemlessly
 mount --bind /data/adb/media_codecs_custom.xml /vendor/etc/media_codecs.xml
 mount --bind /data/adb/media_codecs_vendor_custom.xml /vendor/etc/media_codecs_vendor.xml
-# Restart mediacodec gracefully just once to reload the XMLs
+
+# 3. Restart mediacodec gracefully just once to reload the XMLs
 killall -9 android.hardware.media.omx@1.0-service
 pkill -f -9 mediacodec
 
